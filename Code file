@@ -1,0 +1,72 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB  # Added Naive Bayes classifier
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
+
+# File path
+file_path = r'C:\Users\pc\Desktop\Coding edu\Tez ai\other_version\ktsverivesonuc.csv'
+
+# Read CSV file using pandas
+df = pd.read_csv(file_path, encoding='ISO-8859-9', delimiter=';')
+
+# Separate target variable and independent variables
+X = df.drop('Ana el', axis=1)  # Independent variables
+y = df['Ana el']  # Target variable
+
+# Replace commas with periods and convert to numeric values
+X = X.applymap(lambda x: str(x).replace(',', '.') if isinstance(x, str) else x)
+X = X.astype(float)
+
+# Convert target variable to numeric values (if categorical)
+y = y.astype(str)
+
+def hot_deck_impute(df):
+    for column in df.columns:
+        missing = df[column].isnull()
+        non_missing = df.loc[~missing, column]
+        if missing.any():
+            if len(non_missing) > 0:
+                df.loc[missing, column] = non_missing.sample(missing.sum(), replace=True).values
+            else:
+                df.loc[missing, column] = df[column].mean()
+    return df
+
+# Apply Hot Deck Imputation to X
+X_imputed = hot_deck_impute(X.copy())
+
+# Check for NaN values
+if X_imputed.isnull().values.any():
+    print("X_imputed contains NaN values.")
+
+# Apply Label Encoding to target variable
+le = LabelEncoder()
+y_encoded = le.fit_transform(y)
+
+# If there are missing values in the target variable, fill them using Hot Deck Imputation
+y_imputed_df = pd.DataFrame(y_encoded, columns=['Ana el'])
+y_imputed = hot_deck_impute(y_imputed_df).values.ravel()
+
+# Check for NaN values
+if np.isnan(y_imputed).any():
+    print("y_imputed contains NaN values.")
+
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y_imputed, test_size=0.2, random_state=42)
+
+# Create the Naive Bayes model
+model = GaussianNB()  # Gaussian Naive Bayes model
+
+# Train the model
+model.fit(X_train, y_train)
+
+# Make predictions on the test set
+y_pred = model.predict(X_test)
+
+# Evaluate the results
+print("Confusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred, target_names=le.classes_))
