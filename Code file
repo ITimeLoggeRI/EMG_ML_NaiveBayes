@@ -1,72 +1,88 @@
+# Gerekli kütüphaneleri içe aktar
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.naive_bayes import GaussianNB  # Added Naive Bayes classifier
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.preprocessing import LabelEncoder
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import classification_report, confusion_matrix, log_loss
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+import joblib
+import json
+import io
 
-# File path
-file_path = r'C:\Users\pc\Desktop\Coding edu\Tez ai\other_version\ktsverivesonuc.csv'
+# Colab için dosya yükleme
+from google.colab import files
+uploaded = files.upload()  # Dosya yükleme ekranı açılır
 
-# Read CSV file using pandas
-df = pd.read_csv(file_path, encoding='ISO-8859-9', delimiter=';')
+# Yüklenen dosyayı pandas ile oku
+file_name = list(uploaded.keys())[0]
+df = pd.read_csv(io.BytesIO(uploaded[file_name]), encoding='ISO-8859-9', delimiter=';')
 
-# Separate target variable and independent variables
-X = df.drop('Ana el', axis=1)  # Independent variables
-y = df['Ana el']  # Target variable
-
-# Replace commas with periods and convert to numeric values
-X = X.applymap(lambda x: str(x).replace(',', '.') if isinstance(x, str) else x)
-X = X.astype(float)
-
-# Convert target variable to numeric values (if categorical)
-y = y.astype(str)
-
+# Hot Deck Imputation fonksiyonu
 def hot_deck_impute(df):
     for column in df.columns:
         missing = df[column].isnull()
-        non_missing = df.loc[~missing, column]
         if missing.any():
-            if len(non_missing) > 0:
-                df.loc[missing, column] = non_missing.sample(missing.sum(), replace=True).values
-            else:
-                df.loc[missing, column] = df[column].mean()
+            df.loc[missing, column] = df[column].dropna().sample(n=missing.sum(), random_state=42).values
     return df
 
-# Apply Hot Deck Imputation to X
-X_imputed = hot_deck_impute(X.copy())
+# Eksik değerleri doldurmak için Hot Deck Imputation uygula
+X = df.drop('Ana el', axis=1)  # Bağımsız değişkenler
+y = df['Ana el']  # Hedef değişken
 
-# Check for NaN values
-if X_imputed.isnull().values.any():
-    print("X_imputed contains NaN values.")
+# Virgülleri noktalarla değiştir ve sayısal değerlere dönüştür
+X = X.applymap(lambda x: str(x).replace(',', '.') if isinstance(x, str) else x)
+X = X.astype(float)
+X = hot_deck_impute(X)
 
-# Apply Label Encoding to target variable
+# Hedef değişkeni sayısal değerlere dönüştür
+y = y.astype(str)
 le = LabelEncoder()
 y_encoded = le.fit_transform(y)
 
-# If there are missing values in the target variable, fill them using Hot Deck Imputation
-y_imputed_df = pd.DataFrame(y_encoded, columns=['Ana el'])
-y_imputed = hot_deck_impute(y_imputed_df).values.ravel()
+# Veriyi eğitim ve test setlerine böl
+X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42)
 
-# Check for NaN values
-if np.isnan(y_imputed).any():
-    print("y_imputed contains NaN values.")
+# Özellik ölçeklendirme (isteğe bağlı)
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
 
-# Split the data into training and test sets
-X_train, X_test, y_train, y_test = train_test_split(X_imputed, y_imputed, test_size=0.2, random_state=42)
+# Naive Bayes modeli oluştur ve eğit
+model = GaussianNB()
+model.fit(X_train_scaled, y_train)
 
-# Create the Naive Bayes model
-model = GaussianNB()  # Gaussian Naive Bayes model
+# Eğitim ve test setlerinde tahmin yap
+y_train_pred_proba = model.predict_proba(X_train_scaled)  # Eğitim verisi için olasılık tahminleri
+y_test_pred_proba = model.predict_proba(X_test_scaled)    # Test verisi için olasılık tahminleri
 
-# Train the model
-model.fit(X_train, y_train)
+# Cost fonksiyonlarını hesapla
+train_cost = log_loss(y_train, y_train_pred_proba)
+test_cost = log_loss(y_test, y_test_pred_proba)
 
-# Make predictions on the test set
-y_pred = model.predict(X_test)
+print("\nTrain Cost (Log-Loss):", train_cost)
+print("Test Cost (Log-Loss):", test_cost)
 
-# Evaluate the results
-print("Confusion Matrix:")
+# Test setinde sınıf tahminleri
+y_pred = model.predict(X_test_scaled)
+
+# Performans ölçümleri
+print("\nConfusion Matrix:")
 print(confusion_matrix(y_test, y_pred))
 
 print("\nClassification Report:")
 print(classification_report(y_test, y_pred, target_names=le.classes_))
+
+# Modeli ve performans sonuçlarını kaydet
+joblib.dump(model, "naive_bayes_model.pkl")
+
+performance = {
+    "Confusion Matrix": confusion_matrix(y_test, y_pred).tolist(),
+    "Classification Report": classification_report(y_test, y_pred, target_names=le.classes_, output_dict=True),
+    "Train Cost (Log-Loss)": train_cost,
+    "Test Cost (Log-Loss)": test_cost
+}
+
+with open("naive_bayes_performance.json", "w") as f:
+    json.dump(performance, f, indent=4)
+
+print("\nModel ve performans sonuçları kaydedildi.")
